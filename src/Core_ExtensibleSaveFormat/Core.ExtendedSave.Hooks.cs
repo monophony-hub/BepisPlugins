@@ -113,9 +113,7 @@ namespace ExtensibleSaveFormat
             internal static void ChaFileLoadFilePostHook(ChaFile __instance, bool __result, BinaryReader br)
             {
                 if (!__result) return;
-#if !EC
-                //This function seems not work in EC.
-                
+
                 //Compatibility for ver 1 and 2 ext save data
                 if (br.BaseStream.Position != br.BaseStream.Length)
                 {
@@ -149,7 +147,6 @@ namespace ExtensibleSaveFormat
                     catch (EndOfStreamException) { } //Incomplete/non-existant data
                     catch (SystemException) { } //Invalid/unexpected deserialized data
                 }
-#endif
 
                 //If the event wasn't called at this point, it means the card doesn't contain any data, but we still need to call the even for consistency.
                 if (cardReadEventCalled == false)
