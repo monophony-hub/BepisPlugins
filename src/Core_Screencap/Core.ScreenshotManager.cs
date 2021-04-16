@@ -321,7 +321,8 @@ namespace Screencap
 
                 var result = StitchImages(capture, capture2, ImageSeparationOffset.Value);
 
-                var filename = GetUniqueFilename("3D-Render");
+                //var filename = GetUniqueFilename("3D-Render");
+                var filename = GetUniqueFilename("_RL");
                 File.WriteAllBytes(filename, EncodeToFile(result));
 
                 Logger.Log(ScreenshotMessage.Value ? LogLevel.Message : LogLevel.Info, $"3D Character screenshot saved to {filename}");
@@ -351,7 +352,8 @@ namespace Screencap
                 var output = I360Render.CaptureTex(Resolution360.Value);
                 var capture = EncodeToXmpFile(output);
 
-                var filename = GetUniqueFilename("360");
+                //var filename = GetUniqueFilename("360");
+                var filename = GetUniqueFilename("_360");
                 File.WriteAllBytes(filename, capture);
 
                 Logger.Log(ScreenshotMessage.Value ? LogLevel.Message : LogLevel.Info, $"360 screenshot saved to {filename}");
@@ -383,7 +385,8 @@ namespace Screencap
                 // Overlap is useless for these so don't use
                 var result = StitchImages(capture, capture2, 0);
 
-                var filename = GetUniqueFilename("3D-360");
+                //var filename = GetUniqueFilename("3D-360");
+                var filename = GetUniqueFilename("_360_RL");
                 File.WriteAllBytes(filename, EncodeToXmpFile(result));
 
                 Logger.Log(ScreenshotMessage.Value ? LogLevel.Message : LogLevel.Info, $"3D 360 screenshot saved to {filename}");
@@ -414,6 +417,14 @@ namespace Screencap
 
             var actionScene = GameObject.Find("ActionScene/CameraSystem");
             if (actionScene != null) actionScene.GetComponent<CameraSystem>().ShouldUpdate = enabled;
+#endif
+#if EC
+            foreach (var controllerType in new[] { typeof(BaseCameraControl_Ver2), typeof(BaseCameraControl) })
+            {
+                var cc = targetTr.GetComponent(controllerType);
+                if (cc is MonoBehaviour mb)
+                    mb.enabled = enabled;
+            }
 #endif
         }
 

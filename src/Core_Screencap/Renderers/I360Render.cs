@@ -19,6 +19,8 @@ namespace Screencap
     {
         private static Material equirectangularConverter = null;
         private static int paddingX;
+        private static int paddingY;
+        private static int paddingZ;
 
         public static void Init()
         {
@@ -28,6 +30,8 @@ namespace Screencap
             var ab = AssetBundle.LoadFromMemory(abd);
             equirectangularConverter = new Material(ab.LoadAsset<Shader>("assets/shaders/equirectangularconverter.shader"));
             paddingX = Shader.PropertyToID("_PaddingX");
+            //paddingY = Shader.PropertyToID("_PaddingY");
+            paddingZ = Shader.PropertyToID("_PaddingZ");
             ab.Unload(false);
 
             HarmonyWrapper.PatchAll(typeof(I360Render));
@@ -89,13 +93,15 @@ namespace Screencap
                 cubemap = RenderTexture.GetTemporary(cubemapSize, cubemapSize, 0);
                 cubemap.dimension = UnityEngine.Rendering.TextureDimension.Cube;
 
-                equirectangularTexture = RenderTexture.GetTemporary(cubemapSize, cubemapSize / 2, 0);
+                equirectangularTexture = RenderTexture.GetTemporary(cubemapSize * 2, cubemapSize, 0);
                 equirectangularTexture.dimension = UnityEngine.Rendering.TextureDimension.Tex2D;
 
                 if (!renderCam.RenderToCubemap(cubemap))
                     throw new Exception("Rendering to cubemap is not supported on device/platform");
 
+                //  このGraphics.Blitでは、すべてequirectangularConverterで処理しているので、範囲指定はできない
                 equirectangularConverter.SetFloat(paddingX, faceCameraDirection ? (renderCam.transform.eulerAngles.y / 360f) : 0f);
+                // equirectangularConverter.SetFloat(paddingY, faceCameraDirection ? (renderCam.transform.eulerAngles.x / 360f) : 0f);
                 Graphics.Blit(cubemap, equirectangularTexture, equirectangularConverter);
                 output = RtToT2D(equirectangularTexture);
 
