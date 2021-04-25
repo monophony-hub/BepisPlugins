@@ -1,5 +1,4 @@
-﻿using BepInEx.Harmony;
-using HarmonyLib;
+﻿using HarmonyLib;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -7,7 +6,7 @@ using System.Reflection;
 using UnityEngine;
 #if KK || EC
 using ChaCustom;
-#elif AI
+#elif AI || HS2
 using CharaCustom;
 using AIChara;
 #endif
@@ -16,36 +15,73 @@ namespace SliderUnlocker
 {
     public static partial class Hooks
     {
-        public static void InstallHooks() => HarmonyWrapper.PatchAll(typeof(Hooks));
+        public static void InstallHooks()
+        {
+            var hi = Harmony.CreateAndPatchAll(typeof(Hooks));
+
+#if !PH && !HS
+            var nomF = typeof(ChaFileDefine).GetField("cf_SteamShapeLimit", AccessTools.all);
+            if (nomF != null)
+            {
+                SliderUnlocker.Logger.LogDebug("Nomming the clamp");
+                var arr = (float[])nomF.GetValue(null);
+                for (int i = 0; i < arr.Length; i++)
+                {
+#if KK || EC
+                    if (i == 1)
+#elif AI || HS2
+                    if (i == 9)
+#endif
+                    arr[i] = 1f;
+                    else
+                    arr[i] = 0f;
+                }
+
+                var m = AccessTools.Method(typeof(ChaFileBody), nameof(ChaFileBody.ComplementWithVersion));
+                hi.Patch(m, transpiler: new HarmonyMethod(typeof(Hooks), nameof(NomTheClamp)));
+            }
+#endif
+        }
+
+#if !PH && !HS
+        private static IEnumerable<CodeInstruction> NomTheClamp(IEnumerable<CodeInstruction> instructions)
+        {
+#if KK || EC
+            const string strToNom = "0.0.3";
+#elif AI || HS2
+            const string strToNom = "0.0.2";
+#endif
+            return instructions.Manipulator(instruction => instruction.operand as string == strToNom, instruction => instruction.operand = "0.0.0");
+        }
+#endif
 
         private static readonly FieldInfo akf_dictInfo = typeof(AnimationKeyInfo).GetField("dictInfo", AccessTools.all);
 
         [HarmonyPostfix, HarmonyPatch(typeof(Mathf), "Clamp", typeof(float), typeof(float), typeof(float))]
-        public static void MathfClampHook(ref float __result, float value, float min, float max)
+        private static void MathfClampHook(ref float __result, float value, float min, float max)
         {
             if (min == 0f && max == 100f)
                 __result = value;
         }
 
-        [ParameterByRef(2)]
-        [HarmonyPrefix]
-        [HarmonyPatch(typeof(AnimationKeyInfo), "GetInfo", typeof(string), typeof(float), typeof(Vector3), typeof(byte))]
-        public static void GetInfoSingularPreHook(ref float __state, string name, ref float rate, ref Vector3 value, byte type)
+        [HarmonyPrefix, HarmonyPatch(typeof(AnimationKeyInfo), nameof(AnimationKeyInfo.GetInfo),
+            new Type[] { typeof(string), typeof(float), typeof(Vector3), typeof(byte) },
+            new ArgumentType[] { ArgumentType.Normal, ArgumentType.Normal, ArgumentType.Ref, ArgumentType.Normal })]
+        private static void GetInfoSingularPreHook(ref float __state, ref float rate)
         {
             __state = rate;
 
             if (rate > 1)
                 rate = 1f;
 
-
             if (rate < 0)
                 rate = 0f;
         }
 
-        [ParameterByRef(2)]
-        [HarmonyPostfix]
-        [HarmonyPatch(typeof(AnimationKeyInfo), "GetInfo", typeof(string), typeof(float), typeof(Vector3), typeof(byte))]
-        public static void GetInfoSingularPostHook(AnimationKeyInfo __instance, bool __result, float __state, string name, float rate, ref Vector3 value, byte type)
+        [HarmonyPostfix, HarmonyPatch(typeof(AnimationKeyInfo), nameof(AnimationKeyInfo.GetInfo),
+            new Type[] { typeof(string), typeof(float), typeof(Vector3), typeof(byte) },
+            new ArgumentType[] { ArgumentType.Normal, ArgumentType.Normal, ArgumentType.Ref, ArgumentType.Normal })]
+        private static void GetInfoSingularPostHook(AnimationKeyInfo __instance, bool __result, float __state, string name, ref float rate, ref Vector3 value, byte type)
         {
             if (!__result)
                 return;
@@ -73,25 +109,24 @@ namespace SliderUnlocker
             }
         }
 
-        [ParameterByRef(2)]
-        [HarmonyPrefix]
-        [HarmonyPatch(typeof(AnimationKeyInfo), "GetInfo", typeof(string), typeof(float), typeof(Vector3[]), typeof(bool[]))]
-        public static void GetInfoPreHook(ref float __state, string name, ref float rate, ref Vector3[] value, bool[] flag)
+        [HarmonyPrefix, HarmonyPatch(typeof(AnimationKeyInfo), nameof(AnimationKeyInfo.GetInfo),
+            new Type[] { typeof(string), typeof(float), typeof(Vector3[]), typeof(bool[]) },
+            new ArgumentType[] { ArgumentType.Normal, ArgumentType.Normal, ArgumentType.Ref, ArgumentType.Normal })]
+        private static void GetInfoPreHook(ref float __state, ref float rate)
         {
             __state = rate;
 
             if (rate > 1)
                 rate = 1f;
 
-
             if (rate < 0)
                 rate = 0f;
         }
 
-        [ParameterByRef(2)]
-        [HarmonyPostfix]
-        [HarmonyPatch(typeof(AnimationKeyInfo), "GetInfo", typeof(string), typeof(float), typeof(Vector3[]), typeof(bool[]))]
-        public static void GetInfoPostHook(AnimationKeyInfo __instance, bool __result, float __state, string name, float rate, ref Vector3[] value, bool[] flag)
+        [HarmonyPostfix, HarmonyPatch(typeof(AnimationKeyInfo), nameof(AnimationKeyInfo.GetInfo),
+            new Type[] { typeof(string), typeof(float), typeof(Vector3[]), typeof(bool[]) },
+            new ArgumentType[] { ArgumentType.Normal, ArgumentType.Normal, ArgumentType.Ref, ArgumentType.Normal })]
+        private static void GetInfoPostHook(AnimationKeyInfo __instance, bool __result, float __state, string name, ref float rate, ref Vector3[] value, bool[] flag)
         {
             if (!__result)
                 return;
@@ -116,16 +151,16 @@ namespace SliderUnlocker
             }
         }
 
-#if KK || EC || AI
+#if KK || EC || AI || HS2
         [HarmonyPostfix, HarmonyPatch(typeof(CustomBase), "ConvertTextFromRate")]
-        public static void ConvertTextFromRateHook(ref string __result, int min, int max, float value)
+        private static void ConvertTextFromRateHook(ref string __result, int min, int max, float value)
         {
             if (min == 0 && max == 100)
                 __result = Math.Round(100 * value).ToString(CultureInfo.InvariantCulture);
         }
 
         [HarmonyPostfix, HarmonyPatch(typeof(CustomBase), "ConvertRateFromText")]
-        public static void ConvertRateFromTextHook(ref float __result, int min, int max, string buf)
+        private static void ConvertRateFromTextHook(ref float __result, int min, int max, string buf)
         {
             if (min == 0 && max == 100)
             {
@@ -142,14 +177,59 @@ namespace SliderUnlocker
         }
 
         [HarmonyPrefix, HarmonyPatch(typeof(ChaFileControl), "CheckDataRange")]
-        public static bool CheckDataRangePreHook(ref bool __result)
+        private static bool CheckDataRangePreHook(ref bool __result)
         {
             __result = true;
             return false;
         }
 
         [HarmonyPrefix, HarmonyPatch(typeof(ChaControl), nameof(ChaControl.Reload))]
-        public static void Reload(ChaControl __instance) => __instance.StartCoroutine(SliderUnlocker.ResetAllSliders());
+        private static void Reload(ChaControl __instance)
+        {
+            if (CustomBase.IsInstance())
+                __instance.StartCoroutine(SliderUnlocker.ResetAllSliders());
+        }
+#endif
+
+#if KK  // Prevent slider values from getting clamped to 0.2 - 0.8 range in school mode
+        [HarmonyPrefix, HarmonyPatch(typeof(ChaControl), nameof(ChaControl.InitShapeBody))]
+        private static void InitShapeBodySliderFixPre(ChaControl __instance, out bool __state)
+        {
+            __state = __instance.hiPoly;
+            AccessTools.Property(typeof(ChaControl), nameof(ChaControl.hiPoly)).SetValue(__instance, true, null);
+        }
+
+        [HarmonyPostfix, HarmonyPatch(typeof(ChaControl), nameof(ChaControl.InitShapeBody))]
+        private static void InitShapeBodySliderFixPost(ChaControl __instance, bool __state)
+        {
+            AccessTools.Property(typeof(ChaControl), nameof(ChaControl.hiPoly)).SetValue(__instance, __state, null);
+        }
+
+        [HarmonyPrefix, HarmonyPatch(typeof(ChaControl), nameof(ChaControl.UpdateShapeBodyValueFromCustomInfo))]
+        private static void UpdateShapeBodyValueFromCustomInfoSliderFixPre(ChaControl __instance, out bool __state)
+        {
+            __state = __instance.hiPoly;
+            AccessTools.Property(typeof(ChaControl), nameof(ChaControl.hiPoly)).SetValue(__instance, true, null);
+        }
+
+        [HarmonyPostfix, HarmonyPatch(typeof(ChaControl), nameof(ChaControl.UpdateShapeBodyValueFromCustomInfo))]
+        private static void UpdateShapeBodyValueFromCustomInfoSliderFixPost(ChaControl __instance, bool __state)
+        {
+            AccessTools.Property(typeof(ChaControl), nameof(ChaControl.hiPoly)).SetValue(__instance, __state, null);
+        }
+
+        [HarmonyPrefix, HarmonyPatch(typeof(ChaControl), nameof(ChaControl.SetShapeBodyValue))]
+        private static void SetShapeBodyValueSliderFixPre(ChaControl __instance, out bool __state)
+        {
+            __state = __instance.hiPoly;
+            AccessTools.Property(typeof(ChaControl), nameof(ChaControl.hiPoly)).SetValue(__instance, true, null);
+        }
+
+        [HarmonyPostfix, HarmonyPatch(typeof(ChaControl), nameof(ChaControl.SetShapeBodyValue))]
+        private static void SetShapeBodyValueInfoSliderFixPost(ChaControl __instance, bool __state)
+        {
+            AccessTools.Property(typeof(ChaControl), nameof(ChaControl.hiPoly)).SetValue(__instance, __state, null);
+        }
 #endif
     }
 }

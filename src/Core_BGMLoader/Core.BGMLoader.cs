@@ -40,14 +40,21 @@ namespace BGMLoader
 
                 var path = files[Random.Range(0, files.Length - 1)];
 
-                context.Asset = AudioLoader.LoadAudioClip(path, AudioType.WAV);
+                context.Asset = AudioLoader.LoadAudioClip(path);
                 context.Complete();
             }
         }
 
         public void LoadBGM(IAssetLoadingContext context)
         {
-            if (context.Parameters.Name != null && (context.Parameters.Name.StartsWith("bgm", System.StringComparison.InvariantCultureIgnoreCase) || context.Parameters.Name.StartsWith("ai_bgm", System.StringComparison.InvariantCultureIgnoreCase)) && context.Parameters.Name.Length > 4)
+            if (context.Parameters.Name != null && context.Parameters.Name.Length > 4 &&
+                (context.Parameters.Name.StartsWith("bgm", System.StringComparison.InvariantCultureIgnoreCase)
+#if AI
+                 || context.Parameters.Name.StartsWith("ai_bgm", System.StringComparison.InvariantCultureIgnoreCase)
+#elif HS2
+                 || context.Parameters.Name.StartsWith("hs2_bgm", System.StringComparison.InvariantCultureIgnoreCase)
+#endif
+                ))
             {
                 int bgmTrack = int.Parse(context.Parameters.Name.Substring(context.Parameters.Name.Length - 2, 2));
                 var path = BepInEx.Utility.CombinePaths(BGMDirectory, $"BGM{bgmTrack:00}.ogg");
@@ -56,7 +63,7 @@ namespace BGMLoader
                 {
                     Logger.LogDebug($"Loading BGM track \"{(BGM)bgmTrack}\" from {path}");
 
-                    context.Asset = AudioLoader.LoadVorbis(path);
+                    context.Asset = AudioLoader.LoadAudioClip(path);
                     context.Complete();
                 }
             }

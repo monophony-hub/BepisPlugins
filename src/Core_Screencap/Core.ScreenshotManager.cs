@@ -25,7 +25,7 @@ namespace Screencap
         public const string PluginName = "Screenshot Manager";
         public const string Version = Metadata.PluginsVersion;
         internal static new ManualLogSource Logger;
-        private static int ScreenshotSizeMax => ResolutionAllowExtreme.Value ? 15000 : 4096;
+        private static int ScreenshotSizeMax => ResolutionAllowExtreme.Value ? 15360 : 4096;
         private const int ScreenshotSizeMin = 2;
 
         public static ScreenshotManager Instance { get; private set; }
@@ -65,6 +65,7 @@ namespace Screencap
         public static ConfigEntry<int> JpgQuality { get; private set; }
         public static ConfigEntry<NameFormat> ScreenshotNameFormat { get; private set; }
         public static ConfigEntry<string> ScreenshotNameOverride { get; private set; }
+        public static ConfigEntry<int> UIShotUpscale { get; private set; }
 
         private void InitializeSettings()
         {
@@ -127,7 +128,7 @@ namespace Screencap
             ResolutionAllowExtreme = Config.Bind(
                 "Render Output Resolution", "Allow extreme resolutions",
                 false,
-                new ConfigDescription("Raise maximum rendered screenshot resolution cap to 15k. Trying to take a screenshot too high above 4k WILL CRASH YOUR GAME. ALWAYS SAVE BEFORE ATTEMPTING A SCREENSHOT AND MONITOR RAM USAGE AT ALL TIMES. Changes take effect after restarting the game."));
+                new ConfigDescription("Raise maximum rendered screenshot resolution cap to 16k. Trying to take a screenshot too high above 4k WILL CRASH YOUR GAME. ALWAYS SAVE BEFORE ATTEMPTING A SCREENSHOT AND MONITOR RAM USAGE AT ALL TIMES. Changes take effect after restarting the game."));
 
             ResolutionX = Config.Bind(
                 "Render Output Resolution", "Horizontal",
@@ -168,6 +169,11 @@ namespace Screencap
                 "General", "Screenshot filename Name override",
                 "",
                 new ConfigDescription("Forces the Name part of the filename to always be this instead of varying depending on the name of the current game. Use \"Koikatsu\" to get the old filename behaviour.", null, "Advanced"));
+
+            UIShotUpscale = Config.Bind(
+                "UI Screenshots", "Screenshot resolution multiplier",
+                1,
+                new ConfigDescription("Multiplies the UI screenshot resolution from the current game resolution by this amount.\nWarning: Some elements will still be rendered at the original resolution (most notably the interface).", new AcceptableValueRange<int>(1, 8), "Advanced"));
         }
 
         #endregion
@@ -260,9 +266,9 @@ namespace Screencap
         {
             var filename = GetUniqueFilename("UI");
 #if KK
-            Application.CaptureScreenshot(filename);
+            Application.CaptureScreenshot(filename, UIShotUpscale.Value);
 #elif EC
-            ScreenCapture.CaptureScreenshot(filename);
+            ScreenCapture.CaptureScreenshot(filename, UIShotUpscale.Value);
 #endif
 
             StartCoroutine(TakeScreenshotLog(filename));
@@ -334,7 +340,7 @@ namespace Screencap
 
             try { OnPostCapture?.Invoke(); }
             catch (Exception ex) { Logger.LogError(ex); }
-            
+
             Utils.Sound.Play(SystemSE.photo);
         }
 

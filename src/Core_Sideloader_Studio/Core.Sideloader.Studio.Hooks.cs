@@ -12,7 +12,7 @@ namespace Sideloader
         internal static partial class Hooks
         {
             [HarmonyPostfix, HarmonyPatch(typeof(Studio.Info), "LoadExcelData")]
-            internal static void LoadExcelDataPostfix(string _bundlePath, string _fileName, ref ExcelData __result)
+            private static void LoadExcelDataPostfix(string _bundlePath, string _fileName, ref ExcelData __result)
             {
                 var studioList = Lists.ExternalStudioDataList.Where(x => x.AssetBundleName == _bundlePath && x.FileNameWithoutExtension == _fileName).ToList();
 
@@ -25,23 +25,21 @@ namespace Sideloader
                         __result = (ExcelData)ScriptableObject.CreateInstance(typeof(ExcelData));
                     else //Adding to an existing ExcelData
                         didHeader = true;
-                                       
+
                     foreach (var studioListData in studioList)
                     {
                         if (!didHeader) //Write the headers. I think it's pointless and will be skipped when the ExcelData is read, but it's expected to be there.
                         {
                             foreach (var header in studioListData.Headers)
                             {
-                                var headerParam = new ExcelData.Param();
-                                headerParam.list = header;
+                                var headerParam = new ExcelData.Param { list = header };
                                 __result.list.Add(headerParam);
                             }
                             didHeader = true;
                         }
                         foreach (var entry in studioListData.Entries)
                         {
-                            var param = new ExcelData.Param();
-                            param.list = entry;
+                            var param = new ExcelData.Param { list = entry };
                             __result.list.Add(param);
                         }
                     }
@@ -62,7 +60,7 @@ namespace Sideloader
             }
 
             [HarmonyPrefix, HarmonyPatch(typeof(Studio.AssetBundleCheck), nameof(Studio.AssetBundleCheck.GetAllFileName))]
-            internal static bool GetAllFileName(string _assetBundleName, ref string[] __result)
+            private static bool GetAllFileName(string _assetBundleName, ref string[] __result)
             {
                 var list = Lists.ExternalStudioDataList.Where(x => x.AssetBundleName == _assetBundleName).Select(y => y.FileNameWithoutExtension.ToLower()).ToArray();
                 if (list.Count() > 0)
@@ -74,7 +72,7 @@ namespace Sideloader
             }
 
             [HarmonyPrefix, HarmonyPatch(typeof(Studio.Info), "FindAllAssetName")]
-            internal static bool FindAllAssetNamePrefix(string _bundlePath, string _regex, ref string[] __result)
+            private static bool FindAllAssetNamePrefix(string _bundlePath, string _regex, ref string[] __result)
             {
                 var list = Lists.ExternalStudioDataList.Where(x => x.AssetBundleName == _bundlePath).Select(x => x.FileNameWithoutExtension).ToList();
                 if (list.Count() > 0)
@@ -86,13 +84,26 @@ namespace Sideloader
             }
 
             [HarmonyPostfix, HarmonyPatch(typeof(CommonLib), nameof(CommonLib.GetAssetBundleNameListFromPath))]
-            internal static void GetAssetBundleNameListFromPath(string path, List<string> __result)
+            private static void GetAssetBundleNameListFromPathStudio(string path, List<string> __result)
             {
                 if (path == "studio/info/")
                 {
                     foreach (string assetBundleName in Lists.ExternalStudioDataList.Select(x => x.AssetBundleName).Distinct())
                         if (!__result.Contains(assetBundleName))
                             __result.Add(assetBundleName);
+                }
+            }
+
+            // Override the FileCheck to search asset bundles in zipmods as well
+            internal static void FileCheck(string _path, ref bool __result, Dictionary<string, bool> ___dicConfirmed)
+            {
+                if (__result == false)
+                {
+                    if (BundleManager.Bundles.TryGetValue(_path, out _))
+                    {
+                        __result = true;
+                        ___dicConfirmed[_path] = true;
+                    }
                 }
             }
         }

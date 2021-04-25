@@ -27,22 +27,28 @@ namespace Sideloader.ListLoader
             }
         }
 
-        internal static StudioListData LoadStudioCSV(Stream stream, string fileName)
+        internal static StudioListData LoadStudioCSV(Stream stream, string fileName, string guid)
         {
             StudioListData data = new StudioListData(fileName);
 
             string fileNameStripped = fileName.Remove(0, fileName.LastIndexOf('/') + 1);
+            string listType = fileNameStripped.Split('_')[0].ToLower();
 
             bool CategoryOrGroup = false;
             if (fileNameStripped.Contains("_"))
-                if (Sideloader.StudioListResolveBlacklist.Contains(fileNameStripped.Split('_')[0].ToLower()))
+                if (Sideloader.StudioListResolveBlacklist.Contains(listType))
                     CategoryOrGroup = true;
 
             using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
             {
-                List<string> Header = reader.ReadLine().Trim().Split(',').ToList();
+                string line = reader.ReadLine();
+                if (line == null) return data;
+                List<string> Header = line.Trim().Split(',').ToList();
                 data.Headers.Add(Header);
-                List<string> Header2 = reader.ReadLine().Trim().Split(',').ToList();
+
+                line = reader.ReadLine();
+                if (line == null) return data;
+                List<string> Header2 = line.Trim().Split(',').ToList();
 
                 if (int.TryParse(Header2[0], out int cell))
                     //First cell of the row is a numeric ID, this is a data row
@@ -53,10 +59,10 @@ namespace Sideloader.ListLoader
 
                 while (!reader.EndOfStream)
                 {
-                    string line = reader.ReadLine().Trim();
+                    line = reader.ReadLine().Trim();
 
-                    if (!line.Contains(','))
-                        break;
+                    if (!line.Contains(',')) break;
+                    var lineSplit = line.Split(',');
 
                     data.Entries.Add(FormatList(line.Split(',').ToList(), CategoryOrGroup));
                 }
@@ -65,7 +71,7 @@ namespace Sideloader.ListLoader
 
             List<string> FormatList(List<string> line, bool categoryOrGroup)
             {
-#if AI
+#if AI || HS2
                 //Convert group and category from KK to AI
                 if (CategoryOrGroup)
                 {

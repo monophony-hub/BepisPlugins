@@ -15,7 +15,7 @@ using System.Reflection;
 using System.Text;
 using UnityEngine;
 using XUnity.ResourceRedirector;
-#if AI
+#if AI || HS2
 using AIChara;
 #endif
 
@@ -40,6 +40,8 @@ namespace Sideloader
 
         /// <summary> List of all loaded manifest files </summary>
         public static readonly Dictionary<string, Manifest> Manifests = new Dictionary<string, Manifest>();
+        /// <summary> Dictionary of GUID and loaded zip file name </summary>
+        public static readonly Dictionary<string, string> ZipArchives = new Dictionary<string, string>();
         /// <summary> List of all loaded manifest files </summary>
         [Obsolete("Use Manifests or GetManifest")]
         public static List<Manifest> LoadedManifests;
@@ -60,6 +62,9 @@ namespace Sideloader
 
         internal void Awake()
         {
+#if KK
+            ZipConstants.DefaultCodePage = 0;
+#endif
             Logger = base.Logger;
 
             Hooks.InstallHooks();
@@ -128,10 +133,14 @@ namespace Sideloader
 
                     if (Manifest.TryLoadFromZip(archive, out Manifest manifest))
                     {
+                        //Skip the mod if it is not for this game
                         if (!manifest.Game.IsNullOrWhiteSpace() && !GameNameList.Contains(manifest.Game.ToLower().Replace("!", "")))
+                        {
                             Logger.LogInfo($"Skipping archive \"{GetRelativeArchiveDir(archivePath)}\" because it's meant for {manifest.Game}");
-                        else
-                            return new { archive, manifest };
+                            return null;
+                        }
+
+                        return new { archive, manifest };
                     }
                 }
                 catch (Exception ex)
@@ -172,6 +181,7 @@ namespace Sideloader
                 try
                 {
                     Archives.Add(archive);
+                    ZipArchives[manifest.GUID] = archive.Name;
                     Manifests[manifest.GUID] = manifest;
 
                     LoadAllUnityArchives(archive, archive.Name);
@@ -179,7 +189,7 @@ namespace Sideloader
                     BuildPngFolderList(archive);
 
                     UniversalAutoResolver.GenerateMigrationInfo(manifest, _gatheredMigrationInfos);
-#if AI
+#if AI || HS2
                     UniversalAutoResolver.GenerateHeadPresetInfo(manifest, _gatheredHeadPresetInfos);
                     UniversalAutoResolver.GenerateFaceSkinInfo(manifest, _gatheredFaceSkinInfos);
 #endif
@@ -198,7 +208,7 @@ namespace Sideloader
 
             UniversalAutoResolver.SetResolveInfos(_gatheredResolutionInfos);
             UniversalAutoResolver.SetMigrationInfos(_gatheredMigrationInfos);
-#if AI
+#if AI || HS2
             UniversalAutoResolver.SetHeadPresetInfos(_gatheredHeadPresetInfos);
             UniversalAutoResolver.SetFaceSkinInfos(_gatheredFaceSkinInfos);
             UniversalAutoResolver.ResolveFaceSkins();
@@ -243,7 +253,7 @@ namespace Sideloader
                         Logger.LogError($"Failed to load list file \"{entry.Name}\" from archive \"{GetRelativeArchiveDir(arc.Name)}\" with error: {ex}");
                     }
                 }
-#if KK || AI
+#if KK || AI || HS2
                 else if (entry.Name.StartsWith("abdata/studio/info", StringComparison.OrdinalIgnoreCase) && entry.Name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
                 {
                     if (Path.GetFileNameWithoutExtension(entry.Name).ToLower().StartsWith("itembonelist_"))
@@ -253,7 +263,7 @@ namespace Sideloader
                         try
                         {
                             var stream = arc.GetInputStream(entry);
-                            var studioListData = Lists.LoadStudioCSV(stream, entry.Name);
+                            var studioListData = Lists.LoadStudioCSV(stream, entry.Name, manifest.GUID);
 
                             UniversalAutoResolver.GenerateStudioResolutionInfo(manifest, studioListData);
                             Lists.ExternalStudioDataList.Add(studioListData);
@@ -264,15 +274,22 @@ namespace Sideloader
                         }
                     }
                 }
-#if KK
-                else if (entry.Name.StartsWith("abdata/map/list/mapinfo/", StringComparison.OrdinalIgnoreCase) && entry.Name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+#if AI || HS2
+                else if (entry.Name.StartsWith("abdata/list/map/", StringComparison.OrdinalIgnoreCase) && entry.Name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
                 {
                     try
                     {
-                        var stream = arc.GetInputStream(entry);
-                        MapInfo mapListData = Lists.LoadMapCSV(stream);
+                        string assetBundleName = entry.Name;
+                        assetBundleName = assetBundleName.Remove(0, assetBundleName.IndexOf('/') + 1); //Remove "abdata/"
+                        assetBundleName = assetBundleName.Remove(assetBundleName.LastIndexOf('/')); //Remove the .csv filename
+                        assetBundleName += ".unity3d";
 
-                        Lists.ExternalMapList.Add(mapListData);
+                        string assetName = entry.Name;
+                        assetName = assetName.Remove(0, assetName.LastIndexOf('/') + 1); //Remove all but the filename
+                        assetName = assetName.Remove(assetName.LastIndexOf('.')); //Remove the .csv
+
+                        var stream = arc.GetInputStream(entry);
+                        Lists.LoadExcelDataCSV(assetBundleName, assetName, stream);
                     }
                     catch (Exception ex)
                     {
@@ -283,14 +300,14 @@ namespace Sideloader
 #endif
             }
 
-#if KK || AI
+#if KK || AI || HS2
             //ItemBoneList data must be resolved after the corresponding item so they can be resolved to the same ID
             foreach (ZipEntry entry in BoneList)
             {
                 try
                 {
                     var stream = arc.GetInputStream(entry);
-                    var studioListData = Lists.LoadStudioCSV(stream, entry.Name);
+                    var studioListData = Lists.LoadStudioCSV(stream, entry.Name, manifest.GUID);
 
                     UniversalAutoResolver.GenerateStudioResolutionInfo(manifest, studioListData);
                     Lists.ExternalStudioDataList.Add(studioListData);
@@ -501,11 +518,43 @@ namespace Sideloader
             }
         }
 
+        /// <summary>
+        /// Try to get ExcelData that was originally in .csv form in the mod
+        /// </summary>
+        /// <param name="assetBundleName">Name of the folder containing the .csv file</param>
+        /// <param name="assetName">Name of the .csv file without the file extension</param>
+        /// <param name="excelData">ExcelData or null if none exists</param>
+        /// <returns>True if ExcelData was returned</returns>
+        public static bool TryGetExcelData(string assetBundleName, string assetName, out ExcelData excelData)
+        {
+            excelData = null;
+            if (Lists.ExternalExcelData.TryGetValue(assetBundleName, out var assets))
+                if (assets.TryGetValue(assetName, out excelData))
+                    return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Check whether the asset bundle at the specified path is one managed by Sideloader
+        /// </summary>
+        /// <param name="assetBundlePath">Path to the asset bundle without the leading abdata, i.e. map/list/mapinfo/mymap.unity3d</param>
+        /// <returns>True if the asset bundle is managed by Sideloader, false if not (doesn't exist, vanilla asset bundle, etc)</returns>
+        public static bool IsSideloaderAB(string assetBundlePath)
+        {
+            if (BundleManager.Bundles.ContainsKey(assetBundlePath))
+                return true;
+            if (Lists.ExternalExcelData.ContainsKey(assetBundlePath))
+                return true;
+            if (IsPngFolderOnly(assetBundlePath))
+                return true;
+            return false;
+        }
+
         private void RedirectHook(IAssetLoadingContext context)
         {
             if (context.Parameters.Name == null || context.Bundle.name == null) return;
 
-            if (context.Parameters.Type == typeof(Texture2D))
+            if (typeof(Texture).IsAssignableFrom(context.Parameters.Type))
             {
                 string zipPath = $"abdata/{context.Bundle.name.Replace(".unity3d", "", StringComparison.OrdinalIgnoreCase)}/{context.Parameters.Name}.png";
 
@@ -513,6 +562,15 @@ namespace Sideloader
                 if (tex != null)
                 {
                     context.Asset = tex;
+                    context.Complete();
+                    return;
+                }
+            }
+            if (context.Parameters.Type == typeof(ExcelData))
+            {
+                if (TryGetExcelData(context.Bundle.name, context.Parameters.Name, out var excelData))
+                {
+                    context.Asset = excelData;
                     context.Complete();
                     return;
                 }
@@ -548,6 +606,13 @@ namespace Sideloader
                 {
                     //Create a placeholder asset bundle for png files without a matching asset bundle
                     if (IsPngFolderOnly(bundle))
+                    {
+                        context.Bundle = AssetBundleHelper.CreateEmptyAssetBundle();
+                        context.Bundle.name = bundle;
+                        context.Complete();
+                    }
+                    //Placeholder for .csv excel data
+                    else if (Lists.ExternalExcelData.ContainsKey(bundle))
                     {
                         context.Bundle = AssetBundleHelper.CreateEmptyAssetBundle();
                         context.Bundle.name = bundle;

@@ -1,5 +1,4 @@
-﻿using BepInEx.Harmony;
-using BepInEx.Logging;
+﻿using BepInEx.Logging;
 using HarmonyLib;
 using System;
 using System.Collections.Generic;
@@ -34,13 +33,12 @@ namespace Screencap
             paddingZ = Shader.PropertyToID("_PaddingZ");
             ab.Unload(false);
 
-            HarmonyWrapper.PatchAll(typeof(I360Render));
+            Harmony.CreateAndPatchAll(typeof(I360Render));
         }
 
         // Fix mirrors messing up the capture by blindly inverting culling
-        [HarmonyTranspiler]
-        [HarmonyPatch(typeof(MirrorReflection), nameof(MirrorReflection.OnWillRenderObject))]
-        public static IEnumerable<CodeInstruction> MirrorReflectionTpl(IEnumerable<CodeInstruction> instructions)
+        [HarmonyTranspiler, HarmonyPatch(typeof(MirrorReflection), nameof(MirrorReflection.OnWillRenderObject))]
+        private static IEnumerable<CodeInstruction> MirrorReflectionTpl(IEnumerable<CodeInstruction> instructions)
         {
             var prop = typeof(GL).GetProperty(nameof(GL.invertCulling), AccessTools.all);
             if (prop == null)
@@ -125,7 +123,7 @@ namespace Screencap
         {
             var output = CaptureTex(width, renderCam, faceCameraDirection);
             var result = encodeAsJPEG ? InsertXMPIntoTexture2D_JPEG(output, 100) : InsertXMPIntoTexture2D_PNG(output);
-            GameObject.Destroy(output);
+            UnityEngine.Object.Destroy(output);
             return result;
         }
 

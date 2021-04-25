@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using Logging = BepInEx.Logging;
-#if AI
+#if AI || HS2
 using AIChara;
 #endif
 
@@ -29,12 +29,26 @@ namespace Sideloader.AutoResolver
         private static ILookup<int, ResolveInfo> _resolveInfoLookupLocalSlot;
         private static ILookup<string, MigrationInfo> _migrationInfoLookupGUID;
         private static ILookup<int, MigrationInfo> _migrationInfoLookupSlot;
+#if AI || HS2
+        private static ILookup<int, HeadPresetInfo> _headPresetInfoLookupSlot;
+        private static ILookup<int, FaceSkinInfo> _faceSkinInfoLookupSlot;
+        private static ILookup<int, FaceSkinInfo> _faceSkinInfoLookupLocalSlot;
+#endif
 
         /// <summary>
         /// The starting point for UAR IDs
         /// </summary>
         public const int BaseSlotID = 100000000;
-        private static int CurrentSlotID = BaseSlotID;
+        private static int CurrentSlotID;
+
+        static UniversalAutoResolver()
+        {
+            // Assign each item a new random ID every time the game is started, instead of using sequential numbers that might be the same between game restarts.
+            // This can help uncover bugs in Sideloader and other plugins.
+            var x = new System.Random().Next(0, 1000);
+            CurrentSlotID = BaseSlotID + x;
+            Sideloader.Logger.LogDebug("Starting Slot IDs at " + CurrentSlotID);
+        }
 
         /// <summary>
         /// All loaded ResolveInfo
@@ -106,6 +120,17 @@ namespace Sideloader.AutoResolver
         /// <returns>A list of MigrationInfo</returns>
         public static List<MigrationInfo> GetMigrationInfo(int idOld) => _migrationInfoLookupSlot?[idOld].ToList();
 
+#if AI || HS2
+        internal static HeadPresetInfo TryGetHeadPresetInfo(int slot, string guid, string preset) =>
+            _headPresetInfoLookupSlot?[slot].FirstOrDefault(x => x.HeadGUID == guid && x.Preset == preset);
+        internal static void SetHeadPresetInfos(ICollection<HeadPresetInfo> results) => _headPresetInfoLookupSlot = results.ToLookup(info => info.HeadID);
+
+        internal static FaceSkinInfo TryGetFaceSkinInfo(int slot, string guid) =>
+            _faceSkinInfoLookupSlot?[slot].FirstOrDefault(x => x.SkinSlot == slot && x.SkinGUID == guid);
+        internal static FaceSkinInfo TryGetFaceSkinInfo(int localSlot) =>
+            _faceSkinInfoLookupLocalSlot?[localSlot].FirstOrDefault();
+#endif
+
         internal static void SetResolveInfos(ICollection<ResolveInfo> results)
         {
             _resolveInfoLookupSlot = results.ToLookup(info => info.Slot);
@@ -116,6 +141,21 @@ namespace Sideloader.AutoResolver
             _migrationInfoLookupGUID = results.ToLookup(info => info.GUIDOld);
             _migrationInfoLookupSlot = results.ToLookup(info => info.IDOld);
         }
+
+#if AI || HS2
+        internal static void SetFaceSkinInfos(ICollection<FaceSkinInfo> results)
+        {
+            foreach (var info in results)
+            {
+                var resolveInfo = TryGetResolutionInfo(info.SkinSlot, ChaListDefine.CategoryNo.ft_skin_f, info.SkinGUID);
+                if (resolveInfo != null)
+                    info.SkinLocalSlot = resolveInfo.LocalSlot;
+            }
+
+            _faceSkinInfoLookupSlot = results.ToLookup(info => info.SkinSlot);
+            _faceSkinInfoLookupLocalSlot = results.ToLookup(info => info.SkinLocalSlot);
+        }
+#endif
 
         /// <summary>
         /// Change the ID of items saved to a card to their resolved IDs
@@ -146,7 +186,7 @@ namespace Sideloader.AutoResolver
                 }
 
                 if (Sideloader.MigrationEnabled.Value)
-                    MigrateData(extResolve, kv.Key.Category);
+                    MigrateData(extResolve);
 
                 //If the GUID is blank or has been made blank by migration do compatibility resolve
                 if (extResolve.GUID.IsNullOrWhiteSpace())
@@ -169,13 +209,13 @@ namespace Sideloader.AutoResolver
                 {
 #if KK || EC
                     if (Lists.InternalDataList[kv.Key.Category].ContainsKey(kv.Value.GetMethod(structure)))
-#elif AI
+#elif AI || HS2
                     if (Lists.InternalDataList[(int)kv.Key.Category].ContainsKey(kv.Value.GetMethod(structure)))
 #endif
                     {
 #if KK || EC
                         string mainAB = Lists.InternalDataList[kv.Key.Category][kv.Value.GetMethod(structure)].dictInfo[(int)ChaListDefine.KeyType.MainAB];
-#elif AI
+#elif AI || HS2
                         string mainAB = Lists.InternalDataList[(int)kv.Key.Category][kv.Value.GetMethod(structure)].dictInfo[(int)ChaListDefine.KeyType.MainAB];
 #endif
                         mainAB = mainAB.Replace("chara/", "").Replace(".unity3d", "").Replace(kv.Key.Category.ToString() + "_", "").Replace("/", "");
@@ -184,7 +224,7 @@ namespace Sideloader.AutoResolver
                         {
                             //ID found but it conflicts with a vanilla item. Change the ID to avoid conflicts.
                             ShowGUIDError(extResolve.GUID);
-                            if (kv.Key.Category.ToString().Contains("ao_") && Sideloader.KeepMissingAccessories.Value && Manager.Scene.Instance.NowSceneNames.Any(sceneName => sceneName == "CustomScene"))
+                            if (kv.Key.Category.ToString().Contains("ao_") && Sideloader.KeepMissingAccessories.Value && GetNowSceneNames().Any(sceneName => sceneName == "CustomScene"))
                                 kv.Value.SetMethod(structure, 1);
                             else
                                 kv.Value.SetMethod(structure, BaseSlotID - 1);
@@ -199,7 +239,7 @@ namespace Sideloader.AutoResolver
                     {
                         //ID not found. Change the ID to avoid potential future conflicts.
                         ShowGUIDError(extResolve.GUID);
-                        if (kv.Key.Category.ToString().Contains("ao_") && Sideloader.KeepMissingAccessories.Value && Manager.Scene.Instance.NowSceneNames.Any(sceneName => sceneName == "CustomScene"))
+                        if (kv.Key.Category.ToString().Contains("ao_") && Sideloader.KeepMissingAccessories.Value && GetNowSceneNames().Any(sceneName => sceneName == "CustomScene"))
                             kv.Value.SetMethod(structure, 1);
                         else
                             kv.Value.SetMethod(structure, BaseSlotID - 1);
@@ -213,7 +253,7 @@ namespace Sideloader.AutoResolver
             //Only attempt compatibility resolve if the ID does not belong to a vanilla item or hard mod
 #if KK || EC
             if (!Lists.InternalDataList[kv.Key.Category].ContainsKey(kv.Value.GetMethod(structure)))
-#elif AI
+#elif AI || HS2
             if (!Lists.InternalDataList[(int)kv.Key.Category].ContainsKey(kv.Value.GetMethod(structure)))
 #endif
             {
@@ -248,17 +288,32 @@ namespace Sideloader.AutoResolver
                 //No match was found
                 if (Sideloader.DebugLogging.Value)
                     Sideloader.Logger.LogDebug($"Compatibility resolving failed, no match found for ID {kv.Value.GetMethod(structure)} Category {kv.Key.Category}");
-                if (kv.Key.Category.ToString().Contains("ao_") && Sideloader.KeepMissingAccessories.Value && Manager.Scene.Instance.NowSceneNames.Any(sceneName => sceneName == "CustomScene"))
+                if (kv.Key.Category.ToString().Contains("ao_") && Sideloader.KeepMissingAccessories.Value && GetNowSceneNames().Any(sceneName => sceneName == "CustomScene"))
                     kv.Value.SetMethod(structure, 1);
             }
         }
 
         internal static void IterateCardPrefixes(Action<Dictionary<CategoryProperty, StructValue<int>>, object, ICollection<ResolveInfo>, string> action, ChaFile file, ICollection<ResolveInfo> extInfo)
         {
+#if AI || HS2
+            if (file.parameter.sex == 0)
+            {
+                action(StructReference.ChaFileFacePropertiesMale, file.custom.face, extInfo, "");
+                action(StructReference.ChaFileBodyPropertiesMale, file.custom.body, extInfo, "");
+            }
+            else
+            {
+                action(StructReference.ChaFileFacePropertiesFemale, file.custom.face, extInfo, "");
+                action(StructReference.ChaFileBodyPropertiesFemale, file.custom.body, extInfo, "");
+            }
+
+#else
             action(StructReference.ChaFileFaceProperties, file.custom.face, extInfo, "");
             action(StructReference.ChaFileBodyProperties, file.custom.body, extInfo, "");
+#endif
+
             action(StructReference.ChaFileHairProperties, file.custom.hair, extInfo, "");
-#if AI
+#if AI || HS2
             action(StructReference.ChaFileMakeupProperties, file.custom.face.makeup, extInfo, "");
 #else
             action(StructReference.ChaFileMakeupProperties, file.custom.face.baseMakeup, extInfo, "");
@@ -289,7 +344,44 @@ namespace Sideloader.AutoResolver
             }
         }
 
-        internal static void MigrateData(ResolveInfo extResolve, ChaListDefine.CategoryNo categoryNo)
+#if AI || HS2
+        internal static void ResolveFaceSkins()
+        {
+            foreach (var data in Lists.ExternalDataList.Where(x => x.categoryNo == (int)ChaListDefine.CategoryNo.ft_skin_f))
+            {
+                int IDIndex = data.lstKey.IndexOf("ID");
+                int headIDIndex = data.lstKey.IndexOf("HeadID");
+
+                foreach (var x in data.dictList)
+                {
+                    int id = int.Parse(x.Value[IDIndex]);
+                    int headID = int.Parse(x.Value[headIDIndex]);
+
+                    var faceSkinInfo = TryGetFaceSkinInfo(id);
+                    if (faceSkinInfo == null) continue;
+
+                    var resolveInfo = TryGetResolutionInfo(faceSkinInfo.HeadSlot, ChaListDefine.CategoryNo.fo_head, faceSkinInfo.HeadGUID);
+                    if (resolveInfo == null)
+                        ShowGUIDError(faceSkinInfo.HeadGUID);
+                    else
+                    {
+                        if (headID != faceSkinInfo.HeadSlot)
+                        {
+                            Sideloader.Logger.LogError($"Error resolving face skins, head ID in manifest does do not match ID in list for GUID:{faceSkinInfo.SkinGUID}, skin ID:{faceSkinInfo.SkinSlot}");
+                            continue;
+                        }
+
+                        if (Sideloader.DebugLoggingResolveInfo.Value)
+                            Sideloader.Logger.LogDebug($"Resolving face skin ({faceSkinInfo.SkinGUID}) head ID ({faceSkinInfo.HeadGUID}) from slot {faceSkinInfo.HeadSlot} to slot {resolveInfo.LocalSlot}");
+
+                        x.Value[headIDIndex] = resolveInfo.LocalSlot.ToString();
+                    }
+                }
+            }
+        }
+#endif
+
+        internal static void MigrateData(ResolveInfo extResolve)
         {
             if (extResolve.GUID.IsNullOrWhiteSpace()) return;
 
@@ -301,23 +393,23 @@ namespace Sideloader.AutoResolver
                 return;
             }
 
-            foreach (var migrationInfo in migrationInfoList.Where(x => x.MigrationType == MigrationType.MigrateAll))
-            {
-                if (Sideloader.GetManifest(migrationInfo.GUIDNew) != null)
-                {
-                    Sideloader.Logger.LogInfo($"Migrating GUID {migrationInfo.GUIDOld} -> {migrationInfo.GUIDNew}");
-                    extResolve.GUID = migrationInfo.GUIDNew;
-                    return;
-                }
-            }
-
-            foreach (var migrationInfo in migrationInfoList.Where(x => x.IDOld == extResolve.Slot && categoryNo == extResolve.CategoryNo))
+            foreach (var migrationInfo in migrationInfoList.Where(x => x.IDOld == extResolve.Slot && x.Category == extResolve.CategoryNo))
             {
                 if (Sideloader.GetManifest(migrationInfo.GUIDNew) != null)
                 {
                     Sideloader.Logger.LogInfo($"Migrating {migrationInfo.GUIDOld}:{migrationInfo.IDOld} -> {migrationInfo.GUIDNew}:{migrationInfo.IDNew}");
                     extResolve.GUID = migrationInfo.GUIDNew;
                     extResolve.Slot = migrationInfo.IDNew;
+                    return;
+                }
+            }
+
+            foreach (var migrationInfo in migrationInfoList.Where(x => x.MigrationType == MigrationType.MigrateAll))
+            {
+                if (Sideloader.GetManifest(migrationInfo.GUIDNew) != null)
+                {
+                    Sideloader.Logger.LogInfo($"Migrating GUID {migrationInfo.GUIDOld} -> {migrationInfo.GUIDNew}");
+                    extResolve.GUID = migrationInfo.GUIDNew;
                     return;
                 }
             }
@@ -368,7 +460,7 @@ namespace Sideloader.AutoResolver
                                                       $"GUID: {manifest.GUID} " +
                                                       $"Slot: {int.Parse(kv.Value[0])} " +
                                                       $"LocalSlot: {newSlot} " +
-                                                      $"Property: {propertyKey.ToString()} " +
+                                                      $"Property: {propertyKey} " +
                                                       $"CategoryNo: {category} " +
                                                       $"Count: {LoadedResolutionInfo.Count()}");
                         }
@@ -394,6 +486,20 @@ namespace Sideloader.AutoResolver
             results.AddRange(manifest.MigrationList);
         }
 
+#if AI || HS2
+        internal static void GenerateHeadPresetInfo(Manifest manifest, List<HeadPresetInfo> results)
+        {
+            manifest.LoadHeadPresetInfo();
+            results.AddRange(manifest.HeadPresetList);
+        }
+
+        internal static void GenerateFaceSkinInfo(Manifest manifest, List<FaceSkinInfo> results)
+        {
+            manifest.LoadFaceSkinInfo();
+            results.AddRange(manifest.FaceSkinList);
+        }
+#endif
+
         internal static void ShowGUIDError(string guid)
         {
             Logging.LogLevel loglevel = Sideloader.MissingModWarning.Value ? Logging.LogLevel.Warning | Logging.LogLevel.Message : Logging.LogLevel.Warning;
@@ -401,7 +507,7 @@ namespace Sideloader.AutoResolver
             if (LoadedResolutionInfo.Any(x => x.GUID == guid))
                 //we have the GUID loaded, so the user has an outdated mod
                 Sideloader.Logger.Log(loglevel, $"[UAR] WARNING! Outdated mod detected! [{guid}]");
-#if KK || AI
+#if KK || AI || HS2
             else if (LoadedStudioResolutionInfo.Any(x => x.GUID == guid))
                 //we have the GUID loaded, so the user has an outdated mod
                 Sideloader.Logger.Log(loglevel, $"[UAR] WARNING! Outdated mod detected! [{guid}]");
@@ -409,6 +515,15 @@ namespace Sideloader.AutoResolver
             else
                 //did not find a match, we don't have the mod
                 Sideloader.Logger.Log(loglevel, $"[UAR] WARNING! Missing mod detected! [{guid}]");
+        }
+
+        private static List<string> GetNowSceneNames()
+        {
+#if HS2
+            return Manager.Scene.NowSceneNames;
+#else
+            return Manager.Scene.Instance.NowSceneNames;
+#endif
         }
     }
 }
